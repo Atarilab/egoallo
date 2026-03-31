@@ -130,6 +130,15 @@ class InferenceInputTransforms(TensorDataclass):
         device_calib = provider.get_device_calibration()
         T_device_cpf = device_calib.get_transform_device_cpf().to_matrix()
 
+        # Print sensor extrinsics for debugging Gen 1 vs Gen 2 differences.
+        print("=== Device calibration extrinsics ===")
+        print(f"T_device_cpf:\n{T_device_cpf}")
+        for sensor_label in ["camera-rgb", "camera-slam-left", "camera-slam-right"]:
+            t = device_calib.get_transform_device_sensor(sensor_label)
+            if t is not None:
+                print(f"T_device_{sensor_label}:\n{t.to_matrix()}")
+        print("=====================================")
+
         # Get downsampled CPF frames.
         aria_fps = len(closed_loop_traj) / (
             closed_loop_traj[-1].tracking_timestamp.total_seconds()
