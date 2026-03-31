@@ -140,7 +140,7 @@ class CorrespondedAriaHandWristPoseDetections(TensorDataclass):
                 @ torch.from_numpy(
                     np.array(
                         [
-                            d.get_wrist_and_palm_normal_device().wrist_normal_device
+                            d.wrist_and_palm_normal_device.wrist_normal_device
                             for d in detections
                         ],
                         dtype=np.float32,
@@ -156,7 +156,7 @@ class CorrespondedAriaHandWristPoseDetections(TensorDataclass):
                 @ torch.from_numpy(
                     np.array(
                         [
-                            d.get_wrist_and_palm_normal_device().palm_normal_device
+                            d.wrist_and_palm_normal_device.palm_normal_device
                             for d in detections
                         ],
                         dtype=np.float32,
