@@ -76,12 +76,15 @@ class InferenceTrajectoryPaths:
         if not hamer_outputs.exists():
             hamer_outputs = None
 
-        wrist_and_palm_poses_csv = tuple(traj_root.glob("**/wrist_and_palm_poses.csv"))
+        # Look for hand tracking CSV (new format first, then legacy).
+        wrist_and_palm_poses_csv = tuple(traj_root.glob("**/hand_tracking_results.csv"))
+        if len(wrist_and_palm_poses_csv) == 0:
+            wrist_and_palm_poses_csv = tuple(traj_root.glob("**/wrist_and_palm_poses.csv"))
         if len(wrist_and_palm_poses_csv) == 0:
             wrist_and_palm_poses_csv = None
         else:
             assert len(wrist_and_palm_poses_csv) == 1, (
-                "Found multiple wrist and palm poses files!"
+                "Found multiple hand tracking files!"
             )
 
         splat_path = traj_root / "splat.ply"
