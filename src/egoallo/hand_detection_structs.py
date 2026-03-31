@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pickle
 from pathlib import Path
-from typing import TypedDict, cast
+from typing import Protocol, TypedDict, cast
 
 import numpy as np
 import torch
@@ -66,39 +66,29 @@ class CorrespondedAriaHandWristPoseDetections(TensorDataclass):
     detections_right_concat: AriaHandWristPoseWrtWorld | None
 
     @staticmethod
-    def _palm_normal_from_landmarks(landmarks: np.ndarray) -> np.ndarray:
-        """Compute palm normal from 21 hand landmarks in device frame.
-
-        Uses cross product of (wrist -> middle MCP) and (index MCP -> pinky MCP)
-        to get a vector perpendicular to the palm plane.
-
-        Landmark indices (standard 21-point hand model):
-            0: Wrist, 5: Index MCP, 9: Middle MCP, 17: Pinky MCP
-        """
-        v1 = landmarks[9] - landmarks[0]   # wrist -> middle MCP
-        v2 = landmarks[5] - landmarks[17]  # pinky MCP -> index MCP
-        normal = np.cross(v1, v2)
-        norm = np.linalg.norm(normal)
-        if norm > 1e-8:
-            normal = normal / norm
-        return normal
-
-    @staticmethod
     def load(
         hand_tracking_csv_path: Path,
         target_timestamps_sec: tuple[float, ...],
         Ts_world_device: Float[np.ndarray, "timesteps 7"],
     ) -> CorrespondedAriaHandWristPoseDetections:
+        # API from runtime inspection of `projectaria_tools` outputs.
+        class WristAndPalmNormals(Protocol):
+            wrist_normal_device: np.ndarray
+            palm_normal_device: np.ndarray
+
+        class OneSide(Protocol):
+            confidence: float
+            wrist_position_device: np.ndarray
+            palm_position_device: np.ndarray
+            wrist_and_palm_normal_device: WristAndPalmNormals
+
         ht_results = mps.hand_tracking.read_hand_tracking_results(
             str(hand_tracking_csv_path)
         )
-
-        # Each detection stores the 21x3 landmarks in device frame.
-        detections_left_landmarks: list[np.ndarray] = []
-        detections_right_landmarks: list[np.ndarray] = []
-        indices_left: list[int] = []
-        indices_right: list[int] = []
-
+        detections_left = list[OneSide]()
+        detections_right = list[OneSide]()
+        indices_left = list[int]()
+        indices_right = list[int]()
         for i, time_sec in enumerate(target_timestamps_sec):
             ht_result = get_nearest_hand_tracking_result(
                 ht_results, int(time_sec * 1e9)
@@ -110,26 +100,18 @@ class CorrespondedAriaHandWristPoseDetections(TensorDataclass):
             ):
                 continue
 
-            if ht_result.left_hand is not None:
-                landmarks = np.array(
-                    ht_result.left_hand.landmark_positions_device,
-                    dtype=np.float32,
-                ).reshape(21, 3)
+            if ht_result.left_hand is not None and ht_result.left_hand.confidence > 0.7:
                 indices_left.append(i)
-                detections_left_landmarks.append(landmarks)
+                detections_left.append(ht_result.left_hand)
 
-            if ht_result.right_hand is not None:
-                landmarks = np.array(
-                    ht_result.right_hand.landmark_positions_device,
-                    dtype=np.float32,
-                ).reshape(21, 3)
+            if ht_result.right_hand is not None and ht_result.right_hand.confidence > 0.7:
                 indices_right.append(i)
-                detections_right_landmarks.append(landmarks)
+                detections_right.append(ht_result.right_hand)
 
         def form_detections_concat(
-            landmarks_list: list[np.ndarray], indices: list[int]
+            detections: list[OneSide], indices: list[int]
         ) -> AriaHandWristPoseWrtWorld | None:
-            assert len(landmarks_list) == len(indices)
+            assert len(detections) == len(indices)
             if len(indices) == 0:
                 return None
 
@@ -144,41 +126,51 @@ class CorrespondedAriaHandWristPoseDetections(TensorDataclass):
                 )
             )
 
-            # Landmark 0 = wrist, palm center = mean of MCP landmarks (5, 9, 13, 17).
-            wrist_positions = np.array([lm[0] for lm in landmarks_list], dtype=np.float32)
-            palm_positions = np.array(
-                [lm[[5, 9, 13, 17]].mean(axis=0) for lm in landmarks_list],
-                dtype=np.float32,
-            )
-            palm_normals = np.array(
-                [
-                    CorrespondedAriaHandWristPoseDetections._palm_normal_from_landmarks(lm)
-                    for lm in landmarks_list
-                ],
-                dtype=np.float32,
-            )
-            # Wrist normal: approximate as palm normal (not available from landmarks).
-            wrist_normals = palm_normals.copy()
-
             return AriaHandWristPoseWrtWorld(
-                confidence=torch.ones(len(indices), dtype=torch.float32),
+                confidence=torch.from_numpy(
+                    np.array([d.confidence for d in detections])
+                ),
                 wrist_position=Tslice_world_device
-                @ torch.from_numpy(wrist_positions),
+                @ torch.from_numpy(
+                    np.array(
+                        [d.wrist_position_device for d in detections], dtype=np.float32
+                    )
+                ),
                 wrist_normal=Rslice_world_device
-                @ torch.from_numpy(wrist_normals),
+                @ torch.from_numpy(
+                    np.array(
+                        [
+                            d.wrist_and_palm_normal_device.wrist_normal_device
+                            for d in detections
+                        ],
+                        dtype=np.float32,
+                    )
+                ),
                 palm_position=Tslice_world_device
-                @ torch.from_numpy(palm_positions),
+                @ torch.from_numpy(
+                    np.array(
+                        [d.palm_position_device for d in detections], dtype=np.float32
+                    )
+                ),
                 palm_normal=Rslice_world_device
-                @ torch.from_numpy(palm_normals),
+                @ torch.from_numpy(
+                    np.array(
+                        [
+                            d.wrist_and_palm_normal_device.palm_normal_device
+                            for d in detections
+                        ],
+                        dtype=np.float32,
+                    )
+                ),
                 indices=torch.from_numpy(np.array(indices, dtype=np.int64)),
             )
 
         return CorrespondedAriaHandWristPoseDetections(
             detections_left_concat=form_detections_concat(
-                detections_left_landmarks, indices_left
+                detections_left, indices_left
             ),
             detections_right_concat=form_detections_concat(
-                detections_right_landmarks, indices_right
+                detections_right, indices_right
             ),
         )
 
