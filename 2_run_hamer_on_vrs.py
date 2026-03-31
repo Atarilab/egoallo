@@ -81,7 +81,12 @@ def run_hamer_and_save(
     assert device_calib is not None
     camera_calib = device_calib.get_camera_calib("camera-rgb")
     assert camera_calib is not None
-    pinhole = calibration.get_linear_camera_calibration(1408, 1408, 450)
+    src_width = int(camera_calib.get_image_size()[0])
+    src_height = int(camera_calib.get_image_size()[1])
+    focal_length = camera_calib.get_focal_lengths()[0]
+    pinhole = calibration.get_linear_camera_calibration(
+        src_width, src_height, focal_length
+    )
 
     # Compute camera extrinsics!
     sophus_T_device_camera = device_calib.get_transform_device_sensor("camera-rgb")
@@ -144,7 +149,7 @@ def run_hamer_and_save(
 
         hamer_out_left, hamer_out_right = hamer_helper.look_for_hands(
             undistorted_image,
-            focal_length=450,
+            focal_length=focal_length,
         )
         timestamp_ns = image_data_record.capture_timestamp_ns
 
@@ -175,13 +180,13 @@ def run_hamer_and_save(
             composited,
             hamer_out_left,
             border_color=(255, 100, 100),
-            focal_length=450,
+            focal_length=focal_length,
         )
         composited = hamer_helper.composite_detections(
             composited,
             hamer_out_right,
             border_color=(100, 100, 255),
-            focal_length=450,
+            focal_length=focal_length,
         )
         composited = put_text(
             composited,
@@ -234,6 +239,7 @@ def run_hamer_and_save(
         detections_left_wrt_cam=detections_left_wrt_cam,
         T_device_cam=T_device_cam,
         T_cpf_cam=T_cpf_cam,
+        focal_length=focal_length,
     )
     with open(pickle_out, "wb") as f:
         pickle.dump(outputs, f)

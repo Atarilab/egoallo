@@ -47,6 +47,7 @@ class SavedHamerOutputs(TypedDict):
 
     T_device_cam: np.ndarray  # wxyz_xyz
     T_cpf_cam: np.ndarray  # wxyz_xyz
+    focal_length: float
 
 
 class AriaHandWristPoseWrtWorld(TensorDataclass):
@@ -418,7 +419,7 @@ class CorrespondedHamerDetections(TensorDataclass):
             detections_left_tuple=tuple(detections_left),
             detections_right_tuple=tuple(detections_right),
             T_cpf_cam=torch.from_numpy(hamer_out["T_cpf_cam"]).to(torch.float32),
-            focal_length=450,
+            focal_length=hamer_out.get("focal_length", 450),
             detections_left_concat=make_concat_detections(
                 detections_left, detections_right
             ),
