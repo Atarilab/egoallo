@@ -4,6 +4,10 @@ import pickle
 import shutil
 from pathlib import Path
 
+# Add local hamer to path so HamerHelper can find it correctly
+import sys
+sys.path.insert(0, str(Path(__file__).absolute().parent / "../hamer"))
+
 import cv2
 import imageio.v3 as iio
 import numpy as np
@@ -82,6 +86,8 @@ def run_hamer_and_save(
     # Compute camera extrinsics!
     sophus_T_device_camera = device_calib.get_transform_device_sensor("camera-rgb")
     sophus_T_cpf_camera = device_calib.get_transform_cpf_sensor("camera-rgb")
+    print(sophus_T_device_camera)
+    print(sophus_T_cpf_camera)
     assert sophus_T_device_camera is not None
     assert sophus_T_cpf_camera is not None
 
