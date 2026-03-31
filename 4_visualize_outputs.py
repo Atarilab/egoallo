@@ -32,6 +32,7 @@ from egoallo.vis_helpers import visualize_traj_and_hand_detections
 def main(
     search_root_dir: Path,
     smplh_npz_path: Path = Path("./data/smplh/neutral/model.npz"),
+    aria_gen2: bool = False,
 ) -> None:
     """Visualization script for outputs from EgoAllo.
 
@@ -39,6 +40,8 @@ def main(
         search_root_dir: Root directory where inputs/outputs are stored. All
             NPZ files in this directory will be assumed to be outputs from EgoAllo.
         smplh_npz_path: Path to the SMPLH model NPZ file.
+        aria_gen2: If True, apply 90-degree CCW rotation to RGB images to
+            correct for the Aria Gen 2 camera orientation.
     """
     device = torch.device("cuda")
 
@@ -88,6 +91,7 @@ def main(
                         npz_path,
                         body_model,
                         device=device,
+                        aria_gen2=aria_gen2,
                     )
                     args = npz_path.parent / (npz_path.stem + "_args.yaml")
                     if args.exists():
@@ -102,6 +106,7 @@ def load_and_visualize(
     npz_path: Path,
     body_model: fncsmpl.SmplhModel,
     device: torch.device,
+    aria_gen2: bool = False,
 ) -> Callable[[], int]:
     # Here's how we saved:
     #
@@ -237,7 +242,12 @@ def load_and_visualize(
             image_array = cv2.resize(
                 image_array, (800, 800), interpolation=cv2.INTER_AREA
             )
-            image_array = cv2.rotate(image_array, cv2.ROTATE_90_CLOCKWISE)
+            if aria_gen2:
+                # Gen 2 sensor is 90 CCW relative to Gen 1.
+                # Correct sensor rotation (CCW 90) + display rotation (CW 90) = 180.
+                image_array = cv2.rotate(image_array, cv2.ROTATE_180)
+            else:
+                image_array = cv2.rotate(image_array, cv2.ROTATE_90_CLOCKWISE)
             frames.append(image_array)
 
         fps = len(frames) / total_duration

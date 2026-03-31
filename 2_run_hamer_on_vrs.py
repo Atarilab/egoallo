@@ -7,6 +7,7 @@ from pathlib import Path
 import cv2
 import imageio.v3 as iio
 import numpy as np
+import torch
 import tyro
 from egoallo.hand_detection_structs import (
     SavedHamerOutputs,
@@ -21,9 +22,10 @@ from projectaria_tools.core.data_provider import (
 from tqdm.auto import tqdm
 
 from egoallo.inference_utils import InferenceTrajectoryPaths
+from egoallo.transforms import SO3
 
 
-def main(traj_root: Path, overwrite: bool = False) -> None:
+def main(traj_root: Path, overwrite: bool = False, aria_gen2: bool = False) -> None:
     """Run HaMeR for on trajectory. We'll save outputs to
     `traj_root/hamer_outputs.pkl` and `traj_root/hamer_outputs_render".
 
@@ -31,6 +33,8 @@ def main(traj_root: Path, overwrite: bool = False) -> None:
         traj_root: The root directory of the trajectory. We assume that there's
             a VRS file in this directory.
         overwrite: If True, overwrite any existing HaMeR outputs.
+        aria_gen2: If True, apply 90-degree CCW rotation to RGB images to
+            correct for the Aria Gen 2 camera orientation.
     """
 
     paths = InferenceTrajectoryPaths.find(traj_root)
@@ -39,11 +43,15 @@ def main(traj_root: Path, overwrite: bool = False) -> None:
     assert vrs_path.exists()
     pickle_out = traj_root / "hamer_outputs.pkl"
     hamer_render_out = traj_root / "hamer_outputs_render"  # This is just for debugging.
-    run_hamer_and_save(vrs_path, pickle_out, hamer_render_out, overwrite)
+    run_hamer_and_save(vrs_path, pickle_out, hamer_render_out, overwrite, aria_gen2)
 
 
 def run_hamer_and_save(
-    vrs_path: Path, pickle_out: Path, hamer_render_out: Path, overwrite: bool
+    vrs_path: Path,
+    pickle_out: Path,
+    hamer_render_out: Path,
+    overwrite: bool,
+    aria_gen2: bool = False,
 ) -> None:
     if not overwrite:
         assert not pickle_out.exists()
@@ -76,18 +84,38 @@ def run_hamer_and_save(
     sophus_T_cpf_camera = device_calib.get_transform_cpf_sensor("camera-rgb")
     assert sophus_T_device_camera is not None
     assert sophus_T_cpf_camera is not None
-    T_device_cam = np.concatenate(
-        [
-            sophus_T_device_camera.rotation().to_quat().squeeze(axis=0),
-            sophus_T_device_camera.translation().squeeze(axis=0),
-        ]
-    )
-    T_cpf_cam = np.concatenate(
-        [
-            sophus_T_cpf_camera.rotation().to_quat().squeeze(axis=0),
-            sophus_T_cpf_camera.translation().squeeze(axis=0),
-        ]
-    )
+
+    T_device_cam_mat = np.eye(4)
+    T_device_cam_mat[:3, :3] = sophus_T_device_camera.rotation().to_matrix().squeeze(axis=0)
+    T_device_cam_mat[:3, 3] = sophus_T_device_camera.translation().squeeze(axis=0)
+
+    T_cpf_cam_mat = np.eye(4)
+    T_cpf_cam_mat[:3, :3] = sophus_T_cpf_camera.rotation().to_matrix().squeeze(axis=0)
+    T_cpf_cam_mat[:3, 3] = sophus_T_cpf_camera.translation().squeeze(axis=0)
+
+    if aria_gen2:
+        # The Gen 2 RGB sensor is rotated 90 deg CCW relative to Gen 1.
+        # We rotate the undistorted image 90 CCW to correct this.
+        # This changes the camera coordinate frame:
+        #   X_virtual = -Y_physical, Y_virtual = X_physical, Z_virtual = Z_physical
+        # So we compose R_physical_from_virtual onto the extrinsics.
+        R_physical_from_virtual = np.array(
+            [[0.0, 1.0, 0.0], [-1.0, 0.0, 0.0], [0.0, 0.0, 1.0]]
+        )
+        T_correction = np.eye(4)
+        T_correction[:3, :3] = R_physical_from_virtual
+        T_device_cam_mat = T_device_cam_mat @ T_correction
+        T_cpf_cam_mat = T_cpf_cam_mat @ T_correction
+
+    # Extract quaternion (wxyz) + translation as (7,) vector.
+    def _mat4_to_wxyz_xyz(mat: np.ndarray) -> np.ndarray:
+        quat = SO3.from_matrix(
+            torch.from_numpy(mat[:3, :3]).unsqueeze(0).float()
+        ).wxyz.squeeze(0).numpy()
+        return np.concatenate([quat, mat[:3, 3]])
+
+    T_device_cam = _mat4_to_wxyz_xyz(T_device_cam_mat)
+    T_cpf_cam = _mat4_to_wxyz_xyz(T_cpf_cam_mat)
     assert T_device_cam.shape == T_cpf_cam.shape == (7,)
 
     # Dict from capture timestamp in nanoseconds to fields we care about.
@@ -102,6 +130,11 @@ def run_hamer_and_save(
         undistorted_image = calibration.distort_by_calibration(
             image_data.to_numpy_array(), pinhole, camera_calib
         )
+
+        if aria_gen2:
+            undistorted_image = cv2.rotate(
+                undistorted_image, cv2.ROTATE_90_COUNTERCLOCKWISE
+            )
 
         hamer_out_left, hamer_out_right = hamer_helper.look_for_hands(
             undistorted_image,
