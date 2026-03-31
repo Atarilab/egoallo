@@ -92,12 +92,12 @@ def run_hamer_and_save(
     assert sophus_T_cpf_camera is not None
 
     T_device_cam_mat = np.eye(4)
-    T_device_cam_mat[:3, :3] = sophus_T_device_camera.rotation().to_matrix().squeeze(axis=0)
-    T_device_cam_mat[:3, 3] = sophus_T_device_camera.translation().squeeze(axis=0)
+    T_device_cam_mat[:3, :3] = np.asarray(sophus_T_device_camera.rotation().to_matrix()).reshape(3, 3)
+    T_device_cam_mat[:3, 3] = np.asarray(sophus_T_device_camera.translation()).reshape(3)
 
     T_cpf_cam_mat = np.eye(4)
-    T_cpf_cam_mat[:3, :3] = sophus_T_cpf_camera.rotation().to_matrix().squeeze(axis=0)
-    T_cpf_cam_mat[:3, 3] = sophus_T_cpf_camera.translation().squeeze(axis=0)
+    T_cpf_cam_mat[:3, :3] = np.asarray(sophus_T_cpf_camera.rotation().to_matrix()).reshape(3, 3)
+    T_cpf_cam_mat[:3, 3] = np.asarray(sophus_T_cpf_camera.translation()).reshape(3)
 
     if aria_gen2:
         # The Gen 2 RGB sensor is rotated 90 deg CCW relative to Gen 1.
