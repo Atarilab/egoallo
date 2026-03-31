@@ -133,14 +133,14 @@ class CorrespondedAriaHandWristPoseDetections(TensorDataclass):
                 wrist_position=Tslice_world_device
                 @ torch.from_numpy(
                     np.array(
-                        [d.wrist_position_device for d in detections], dtype=np.float32
+                        [d.get_wrist_position_device() for d in detections], dtype=np.float32
                     )
                 ),
                 wrist_normal=Rslice_world_device
                 @ torch.from_numpy(
                     np.array(
                         [
-                            d.wrist_and_palm_normal_device.wrist_normal_device
+                            d.get_wrist_and_palm_normal_device().wrist_normal_device
                             for d in detections
                         ],
                         dtype=np.float32,
@@ -149,14 +149,14 @@ class CorrespondedAriaHandWristPoseDetections(TensorDataclass):
                 palm_position=Tslice_world_device
                 @ torch.from_numpy(
                     np.array(
-                        [d.palm_position_device for d in detections], dtype=np.float32
+                        [d.get_palm_position_device() for d in detections], dtype=np.float32
                     )
                 ),
                 palm_normal=Rslice_world_device
                 @ torch.from_numpy(
                     np.array(
                         [
-                            d.wrist_and_palm_normal_device.palm_normal_device
+                            d.get_wrist_and_palm_normal_device().palm_normal_device
                             for d in detections
                         ],
                         dtype=np.float32,
