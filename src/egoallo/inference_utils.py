@@ -53,17 +53,20 @@ def load_denoiser(checkpoint_dir: Path) -> EgoDenoiser:
 class InferenceTrajectoryPaths:
     """Paths for running EgoAllo on a single sequence from Project Aria.
 
-    Our basic assumptions here are:
-    1. VRS file for images: there is exactly one VRS file in the trajectory root directory.
-    2. Aria MPS point cloud: there is either one semidense_points.csv.gz file or one global_points.csv.gz file.
-        - Its parent directory should contain other Aria MPS artifacts. (like poses)
-        - This is optionally used for guidance.
-    3. HaMeR outputs: The hamer_outputs.pkl file may or may not exist in the trajectory root directory.
-        - This is optionally used for guidance.
-    4. Aria MPS wrist/palm poses: There may be zero or one wrist_and_palm_poses.csv file.
-        - This is optionally used for guidance.
-    5. Scene splat/ply file: There may be a splat.ply or scene.splat file.
-        - This is only used for visualization.
+    Expected directory layout::
+
+        traj_root/
+            video.vrs
+            mps_video_vrs/
+                slam/
+                    closed_loop_trajectory.csv
+                    semidense_points.csv.gz   # or global_points.csv.gz
+                    ...
+                hand_tracking/
+                    hand_tracking_results.csv
+                    ...
+            hamer_outputs.pkl          # optional, for HaMeR guidance
+            splat.ply / scene.splat    # optional, for visualization
     """
 
     vrs_file: Path
@@ -78,38 +81,48 @@ class InferenceTrajectoryPaths:
         traj_root: Path,
         tracking_source: TrackingSource = "mps",
     ) -> InferenceTrajectoryPaths:
-        vrs_files = tuple(traj_root.glob("**/*.vrs"))
-        assert len(vrs_files) == 1, f"Found {len(vrs_files)} VRS files!"
+        vrs_files = tuple(traj_root.glob("*.vrs"))
+        assert len(vrs_files) == 1, (
+            f"Expected exactly one VRS file in {traj_root}, found {len(vrs_files)}"
+        )
 
-        points_paths = tuple(traj_root.glob("**/semidense_points.csv.gz"))
-        assert len(points_paths) <= 1, f"Found multiple points files! {points_paths}"
-        if len(points_paths) == 0:
-            points_paths = tuple(traj_root.glob("**/global_points.csv.gz"))
-        assert len(points_paths) == 1, f"Found {len(points_paths)} files!"
+        # Locate the MPS output root (e.g. mps_video_vrs/).
+        mps_dirs = [
+            d
+            for d in traj_root.iterdir()
+            if d.is_dir() and d.name.startswith("mps_")
+        ]
+        assert len(mps_dirs) == 1, (
+            f"Expected exactly one mps_* directory in {traj_root}, found {mps_dirs}"
+        )
+        mps_root = mps_dirs[0]
+
+        # SLAM artifacts live under mps_*/slam/.
+        slam_dir = mps_root / "slam"
+        assert slam_dir.is_dir(), f"Missing SLAM directory: {slam_dir}"
+
+        points_path = slam_dir / "semidense_points.csv.gz"
+        if not points_path.exists():
+            points_path = slam_dir / "global_points.csv.gz"
+        assert points_path.exists(), (
+            f"No points file (semidense_points.csv.gz or global_points.csv.gz) "
+            f"found in {slam_dir}"
+        )
 
         hamer_outputs = traj_root / "hamer_outputs.pkl"
         if not hamer_outputs.exists():
             hamer_outputs = None
 
-        # Look for hand tracking CSV (new format first, then legacy). Only used
-        # when tracking_source == "mps"; for "vrs" we read hand tracking from
-        # the VRS file directly.
+        # Hand tracking CSV lives under mps_*/hand_tracking/. Only used when
+        # tracking_source == "mps"; for "vrs" we read from the VRS file.
+        wrist_and_palm_poses_csv: Path | None = None
         if tracking_source == "mps":
-            wrist_and_palm_poses_csv = tuple(
-                traj_root.glob("**/hand_tracking_results.csv")
-            )
-            if len(wrist_and_palm_poses_csv) == 0:
-                wrist_and_palm_poses_csv = tuple(
-                    traj_root.glob("**/wrist_and_palm_poses.csv")
-                )
-            if len(wrist_and_palm_poses_csv) == 0:
-                wrist_and_palm_poses_csv = None
-            else:
-                assert len(wrist_and_palm_poses_csv) == 1, (
-                    "Found multiple hand tracking files!"
-                )
-        else:
-            wrist_and_palm_poses_csv = None
+            ht_dir = mps_root / "hand_tracking"
+            ht_csv = ht_dir / "hand_tracking_results.csv"
+            if not ht_csv.exists():
+                ht_csv = ht_dir / "wrist_and_palm_poses.csv"
+            if ht_csv.exists():
+                wrist_and_palm_poses_csv = ht_csv
 
         splat_path = traj_root / "splat.ply"
         if not splat_path.exists():
@@ -122,12 +135,10 @@ class InferenceTrajectoryPaths:
 
         return InferenceTrajectoryPaths(
             vrs_file=vrs_files[0],
-            slam_root_dir=points_paths[0].parent,
-            points_path=points_paths[0],
+            slam_root_dir=slam_dir,
+            points_path=points_path,
             hamer_outputs=hamer_outputs,
-            wrist_and_palm_poses_csv=wrist_and_palm_poses_csv[0]
-            if wrist_and_palm_poses_csv
-            else None,
+            wrist_and_palm_poses_csv=wrist_and_palm_poses_csv,
             splat_path=splat_path,
         )
 
