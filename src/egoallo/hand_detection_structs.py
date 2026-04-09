@@ -14,7 +14,6 @@ import numpy as np
 import torch
 from jaxtyping import Float, Int
 from projectaria_tools.core import mps
-from projectaria_tools.core.data_provider import create_vrs_data_provider
 from projectaria_tools.core.mps.utils import get_nearest_hand_tracking_result
 from torch import Tensor
 
@@ -72,52 +71,7 @@ class CorrespondedAriaHandWristPoseDetections(TensorDataclass):
         target_timestamps_sec: tuple[float, ...],
         Ts_world_device: Float[np.ndarray, "timesteps 7"],
     ) -> CorrespondedAriaHandWristPoseDetections:
-        """Load hand tracking from an MPS ``hand_tracking_results.csv`` file."""
-        ht_results = mps.hand_tracking.read_hand_tracking_results(
-            str(hand_tracking_csv_path)
-        )
-        return CorrespondedAriaHandWristPoseDetections._from_ht_results(
-            ht_results, target_timestamps_sec, Ts_world_device
-        )
-
-    @staticmethod
-    def load_from_vrs(
-        vrs_path: Path,
-        target_timestamps_sec: tuple[float, ...],
-        Ts_world_device: Float[np.ndarray, "timesteps 7"],
-    ) -> CorrespondedAriaHandWristPoseDetections:
-        """Load on-device hand tracking from the ``handtracking`` stream of a
-        VRS file (Aria Gen 2 only).
-
-        Returns the same `HandTrackingResult` shape as the MPS CSV path, so
-        downstream processing is identical.
-        """
-        provider = create_vrs_data_provider(str(vrs_path))
-        ht_stream_id = provider.get_stream_id_from_label("handtracking")
-        if ht_stream_id is None:
-            raise RuntimeError(
-                f"VRS file {vrs_path} has no on-device 'handtracking' stream. "
-                "On-device hand tracking is Aria Gen 2 only."
-            )
-        num_records = provider.get_num_data(ht_stream_id)
-        ht_results = [
-            provider.get_hand_pose_data_by_index(ht_stream_id, i)
-            for i in range(num_records)
-        ]
-        return CorrespondedAriaHandWristPoseDetections._from_ht_results(
-            ht_results, target_timestamps_sec, Ts_world_device
-        )
-
-    @staticmethod
-    def _from_ht_results(
-        ht_results: list,
-        target_timestamps_sec: tuple[float, ...],
-        Ts_world_device: Float[np.ndarray, "timesteps 7"],
-    ) -> CorrespondedAriaHandWristPoseDetections:
-        # API from runtime inspection of `projectaria_tools` outputs. Both
-        # `mps.hand_tracking.read_hand_tracking_results` (CSV path) and
-        # `VrsDataProvider.get_hand_pose_data_by_index` (on-device stream)
-        # return objects with this shape.
+        # API from runtime inspection of `projectaria_tools` outputs.
         class WristAndPalmNormals(Protocol):
             wrist_normal_device: np.ndarray
             palm_normal_device: np.ndarray
@@ -128,6 +82,9 @@ class CorrespondedAriaHandWristPoseDetections(TensorDataclass):
             palm_position_device: np.ndarray
             wrist_and_palm_normal_device: WristAndPalmNormals
 
+        ht_results = mps.hand_tracking.read_hand_tracking_results(
+            str(hand_tracking_csv_path)
+        )
         detections_left = list[OneSide]()
         detections_right = list[OneSide]()
         indices_left = list[int]()

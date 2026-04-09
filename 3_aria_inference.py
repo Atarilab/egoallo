@@ -3,8 +3,6 @@ from __future__ import annotations
 import dataclasses
 import time
 from pathlib import Path
-from typing import Literal
-
 import numpy as np
 import torch
 import viser
@@ -62,21 +60,12 @@ class Args:
     """Whether to save the output trajectory, which will be placed under `traj_dir/egoallo_outputs/some_name.npz`."""
     visualize_traj: bool = False
     """Whether to visualize the trajectory after sampling."""
-    tracking_source: Literal["mps", "vrs"] = "mps"
-    """Where to read SLAM device poses and Aria hand tracking from.
-
-    - "mps": read MPS sidecar CSVs (closed_loop_trajectory.csv, hand_tracking_results.csv).
-    - "vrs": read on-device VIO and on-device hand tracking from streams baked
-      into the VRS file. Aria Gen 2 only.
-    """
 
 
 def main(args: Args) -> None:
     device = torch.device("cuda")
 
-    traj_paths = InferenceTrajectoryPaths.find(
-        args.traj_root, tracking_source=args.tracking_source
-    )
+    traj_paths = InferenceTrajectoryPaths.find(args.traj_root)
     if traj_paths.splat_path is not None:
         print("Found splat at", traj_paths.splat_path)
     else:
@@ -86,10 +75,7 @@ def main(args: Args) -> None:
 
     # Read transforms from VRS / MPS, downsampled.
     transforms = InferenceInputTransforms.load(
-        traj_paths.vrs_file,
-        traj_paths.slam_root_dir,
-        fps=30,
-        source=args.tracking_source,
+        traj_paths.vrs_file, traj_paths.slam_root_dir, fps=30
     ).to(device=device)
 
     # Note the off-by-one for Ts_world_cpf, which we need for relative transform computation.
@@ -124,13 +110,7 @@ def main(args: Args) -> None:
         hamer_detections = None
 
     # Get temporally corresponded Aria wrist and palm estimates.
-    if args.tracking_source == "vrs":
-        aria_detections = CorrespondedAriaHandWristPoseDetections.load_from_vrs(
-            traj_paths.vrs_file,
-            pose_timestamps_sec,
-            Ts_world_device=Ts_world_device.numpy(force=True),
-        ).to(device)
-    elif traj_paths.wrist_and_palm_poses_csv is not None:
+    if traj_paths.wrist_and_palm_poses_csv is not None:
         aria_detections = CorrespondedAriaHandWristPoseDetections.load(
             traj_paths.wrist_and_palm_poses_csv,
             pose_timestamps_sec,
