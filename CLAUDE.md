@@ -23,6 +23,8 @@ pip install git+https://github.com/brentyi/hamer_helper.git
 
 SMPL-H model file expected at `./data/smplh/neutral/model.npz` (download from MANO project).
 
+`bash download_checkpoint_and_data.sh` fetches the model checkpoint (unzips to `./egoallo_checkpoint_april13/checkpoints_3000000/`, the default `--checkpoint-dir`) and example trajectories.
+
 ## Commands
 
 ```bash
@@ -60,7 +62,12 @@ No unit test suite exists; validation is manual/visual.
 - **`transforms/`** - SO(3) and SE(3) Lie group operations. Quaternion convention: (w,x,y,z).
 - **`data/`** - `EgoAmassHdf5Dataset` loads training data from HDF5. `EgoTrainingData` is the main data structure with transforms, quaternions, contacts, shape params.
 - **`hand_detection_structs.py`** - Structures for HaMeR and Aria hand detection results.
+- **`inference_utils.py`** - `InferenceTrajectoryPaths.find()` resolves the on-disk layout for an inference trajectory; `InferenceInputTransforms` loads VRS + MPS poses downsampled to a target fps.
 - **`vis_helpers.py`** - 3D visualization with Viser (Gaussian splats, PLY point clouds, SMPL-H meshes).
+
+### Inference trajectory layout
+
+`InferenceTrajectoryPaths.find()` expects exactly one `mps_*/` directory under `--traj-root`, with SLAM artifacts under `mps_*/slam/` (`closed_loop_trajectory.csv`, `semidense_points.csv.gz`) and hand tracking under `mps_*/hand_tracking/`. There is no longer a fallback to on-device VRS streams — MPS output is required. Optional `hamer_outputs.pkl` lives at the trajectory root.
 
 ### Key coordinate frames
 
@@ -71,6 +78,10 @@ No unit test suite exists; validation is manual/visual.
 ### Type annotations
 
 Uses `jaxtyping` for tensor shape annotations (e.g., `Float[Tensor, "batch time 3"]`) with `typeguard` runtime checking.
+
+### CLI
+
+Numbered scripts parse args via `tyro.cli(Args)` over a `@dataclasses.dataclass`; pass `--help` to any script to see the full options derived from the dataclass fields and docstrings.
 
 ## Tool configuration
 
