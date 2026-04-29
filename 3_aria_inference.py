@@ -45,7 +45,7 @@ class Args:
     """Rotate the CPF poses by some X angle."""
     start_index: int = 0
     """Index within the downsampled trajectory to start inference at."""
-    traj_length: int = 128
+    traj_length: int = 10000
     """How many timesteps to estimate body motion for."""
     num_samples: int = 1
     """Number of samples to take."""
