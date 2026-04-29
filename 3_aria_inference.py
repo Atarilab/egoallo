@@ -18,6 +18,7 @@ from egoallo.hand_detection_structs import (
 from egoallo.inference_utils import (
     InferenceInputTransforms,
     InferenceTrajectoryPaths,
+    betas_from_height,
     load_denoiser,
 )
 from egoallo.sampling import run_sampling_with_stitching
@@ -60,6 +61,11 @@ class Args:
     """Whether to save the output trajectory, which will be placed under `traj_dir/egoallo_outputs/some_name.npz`."""
     visualize_traj: bool = False
     """Whether to visualize the trajectory after sampling."""
+    target_height: float | None = None
+    """If set, override the predicted SMPL-H betas so the rendered body is this
+    tall (head-to-foot extent in meters). Useful for short subjects (e.g. 1.35
+    for a child). Only beta[0] is solved; remaining beta dimensions are zeroed.
+    When unset (default), betas predicted by the diffusion model are kept as-is."""
 
 
 def main(args: Args) -> None:
@@ -130,6 +136,17 @@ def main(args: Args) -> None:
     denoiser_network = load_denoiser(args.checkpoint_dir).to(device)
     body_model = fncsmpl.SmplhModel.load(args.smplh_npz_path).to(device)
 
+    target_betas = (
+        betas_from_height(body_model, args.target_height)
+        if args.target_height is not None
+        else None
+    )
+    if target_betas is not None:
+        print(
+            f"Overriding predicted betas to fit target_height={args.target_height} m: "
+            f"beta[0]={target_betas[0].item():.4f}"
+        )
+
     traj = run_sampling_with_stitching(
         denoiser_network,
         body_model=body_model,
@@ -142,6 +159,7 @@ def main(args: Args) -> None:
         num_samples=args.num_samples,
         device=device,
         floor_z=floor_z,
+        target_betas=target_betas,
     )
 
     # Save outputs in case we want to visualize later.

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import time
 
 import numpy as np
@@ -69,6 +70,7 @@ def run_sampling_with_stitching(
     num_samples: int,
     device: torch.device,
     guidance_verbose: bool = True,
+    target_betas: Float[Tensor, "16"] | None = None,
 ) -> network.EgoDenoiseTraj:
     # Offset the T_world_cpf transform to place the floor at z=0 for the
     # denoiser network. All of the network outputs are local, so we don't need to
@@ -214,6 +216,14 @@ def run_sampling_with_stitching(
 
     if guidance_mode != "off" and guidance_post:
         constrained_traj = x_t_list[-1]
+        if target_betas is not None:
+            constrained_traj = dataclasses.replace(
+                constrained_traj,
+                betas=target_betas.to(
+                    device=constrained_traj.betas.device,
+                    dtype=constrained_traj.betas.dtype,
+                )[None, None, :].expand_as(constrained_traj.betas).contiguous(),
+            )
         constrained_traj, _ = do_guidance_optimization(
             # It's important that we _don't_ use the shifted transforms here.
             Ts_world_cpf=Ts_world_cpf[1:, :],
@@ -231,4 +241,13 @@ def run_sampling_with_stitching(
     else:
         assert start_time is not None
         print("RUNTIME (exclude first optimization)", time.time() - start_time)
-        return x_t_list[-1]
+        final_traj = x_t_list[-1]
+        if target_betas is not None:
+            final_traj = dataclasses.replace(
+                final_traj,
+                betas=target_betas.to(
+                    device=final_traj.betas.device,
+                    dtype=final_traj.betas.dtype,
+                )[None, None, :].expand_as(final_traj.betas).contiguous(),
+            )
+        return final_traj

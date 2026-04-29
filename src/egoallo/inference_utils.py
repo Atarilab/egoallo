@@ -14,6 +14,7 @@ from projectaria_tools.core.data_provider import create_vrs_data_provider
 from safetensors import safe_open
 from torch import Tensor
 
+from .fncsmpl import SmplhModel
 from .network import EgoDenoiser, EgoDenoiserConfig
 from .tensor_dataclass import TensorDataclass
 from .transforms import SE3
@@ -35,6 +36,58 @@ def load_denoiser(checkpoint_dir: Path) -> EgoDenoiser:
     model.load_state_dict(state_dict)
 
     return model
+
+
+def betas_from_height(
+    body_model: SmplhModel,
+    target_height_m: float,
+    tol_m: float = 1e-3,
+    max_iters: int = 40,
+) -> Float[Tensor, "16"]:
+    """Solve for a 16-dim SMPL-H beta vector whose T-pose mesh is `target_height_m`
+    tall (head-to-foot vertical extent).
+
+    Adjusts beta[0] only (the dominant stature axis); other coefficients stay zero.
+    Useful for fitting the rendered body to a known subject height when the
+    diffusion model's predicted shape would otherwise default to AMASS-adult.
+    """
+    device = body_model.v_template.device
+    dtype = body_model.v_template.dtype
+    num_joints = body_model.get_num_joints()
+
+    identity_quat = torch.zeros(4, dtype=dtype, device=device)
+    identity_quat[0] = 1.0
+    local_quats = identity_quat.expand(num_joints, 4).contiguous()
+    T_world_root = torch.zeros(7, dtype=dtype, device=device)
+    T_world_root[0] = 1.0
+
+    def measure_height(beta0: float) -> float:
+        betas = torch.zeros(16, dtype=dtype, device=device)
+        betas[0] = beta0
+        mesh = body_model.with_shape(betas).with_pose(T_world_root, local_quats).lbs()
+        verts_z = mesh.verts[..., 2]
+        return float(verts_z.max() - verts_z.min())
+
+    lo, hi = -5.0, 5.0
+    h_lo = measure_height(lo)
+    h_hi = measure_height(hi)
+    increases_with_beta = h_hi > h_lo
+
+    mid = 0.5 * (lo + hi)
+    for _ in range(max_iters):
+        mid = 0.5 * (lo + hi)
+        h_mid = measure_height(mid)
+        if abs(h_mid - target_height_m) < tol_m:
+            break
+        too_short = h_mid < target_height_m
+        if too_short == increases_with_beta:
+            lo = mid
+        else:
+            hi = mid
+
+    betas = torch.zeros(16, dtype=dtype, device=device)
+    betas[0] = mid
+    return betas
 
 
 @dataclass(frozen=True)
